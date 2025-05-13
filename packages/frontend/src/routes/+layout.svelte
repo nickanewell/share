@@ -20,7 +20,7 @@
 </script>
 
 <svelte:head>
-	<title>{$status?.theme_page_title || 'cryptgeon'}</title>
+	<title>Rival IT Share</title>
 	<link rel="icon" href={$status?.theme_favicon || '/favicon.png'} />
 </svelte:head>
 
