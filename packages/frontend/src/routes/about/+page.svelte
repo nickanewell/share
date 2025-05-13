@@ -11,7 +11,7 @@
 	<h1>About</h1>
 
 	<p>
-		<i>Rival IT Share</i> is a secure, open source sharing note / file service inspired by
+		<i>cryptgeon</i> is a secure, open source sharing note / file service inspired by
 		<a href="https://privnote.com"><i>PrivNote</i></a>.
 	</p>
 
