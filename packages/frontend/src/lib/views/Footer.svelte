@@ -13,9 +13,6 @@
 		{:else if $status?.imprint_html}
 			<a href="/imprint">/imprint</a>
 		{/if}
-		<a href="https://github.com/cupcakearmy/cryptgeon" target="_blank" rel="noopener noreferrer">
-			code
-		</a>
 	</nav>
 </footer>
 
