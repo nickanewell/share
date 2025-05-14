@@ -37,11 +37,6 @@
 	<AboutParagraph title="tech stack">
 		<span>
 			the backend is written in rust and the frontend is svelte and typescript.
-			<br />
-			you are welcomed to check & audit the
-			<a href="https://github.com/nickanewell/share" target="_blank" rel="noopener noreferrer">
-				source code</a
-			>.
 		</span>
 	</AboutParagraph>
 
