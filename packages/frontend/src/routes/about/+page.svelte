@@ -11,7 +11,7 @@
 	<h1>About</h1>
 
 	<p>
-		<i>cryptgeon</i> is a secure, open source sharing note / file service inspired by
+		<i>Rival IT Share</i> is a secure, open source sharing note / file service inspired by
 		<a href="https://privnote.com"><i>PrivNote</i></a>.
 	</p>
 
@@ -39,7 +39,7 @@
 			the backend is written in rust and the frontend is svelte and typescript.
 			<br />
 			you are welcomed to check & audit the
-			<a href="https://github.com/cupcakearmy/cryptgeon" target="_blank" rel="noopener noreferrer">
+			<a href="https://github.com/nickanewell/share" target="_blank" rel="noopener noreferrer">
 				source code</a
 			>.
 		</span>
