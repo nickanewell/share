@@ -7,7 +7,7 @@
 </script>
 
 <header>
-	<a on:click={reset} href="/">
+	<a onclick={reset} href="/">
 		<img alt="logo" src={$themeLogo} />
 	</a>
 </header>
