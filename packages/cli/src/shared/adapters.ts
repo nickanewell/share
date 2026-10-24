@@ -1,5 +1,6 @@
 import { AES, Bytes, type TypedArray } from 'occulto'
-import type { EncryptedFileDTO, FileDTO } from './api'
+import type { FileDTO } from './api'
+import { decryptFilesWithInfo, encryptFiles } from './files.js'
 
 abstract class CryptAdapter<T> {
   abstract encrypt(plaintext: T, key: TypedArray): Promise<string>
@@ -29,28 +30,15 @@ class CryptBlobAdapter implements CryptAdapter<TypedArray> {
 
 class CryptFilesAdapter implements CryptAdapter<FileDTO[]> {
   async encrypt(plaintext: FileDTO[], key: TypedArray) {
-    const adapter = new CryptBlobAdapter()
-    const data: Promise<EncryptedFileDTO>[] = plaintext.map(async (file) => ({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      contents: await adapter.encrypt(file.contents, key),
-    }))
-    return JSON.stringify(await Promise.all(data))
+    return encryptFiles(plaintext, key)
   }
 
   async decrypt(ciphertext: string, key: TypedArray) {
-    const adapter = new CryptBlobAdapter()
-    const data: EncryptedFileDTO[] = JSON.parse(ciphertext)
-    const files: FileDTO[] = await Promise.all(
-      data.map(async (file) => ({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        contents: await adapter.decrypt(file.contents, key),
-      }))
-    )
-    return files
+    return (await decryptFilesWithInfo(ciphertext, key)).files
+  }
+
+  async decryptWithInfo(ciphertext: string, key: TypedArray) {
+    return decryptFilesWithInfo(ciphertext, key)
   }
 }
 

@@ -89,6 +89,9 @@ Disable future scheduled proposals by removing/setting the repository variable t
 ## Maintenance outside upstream syncing
 
 Stable upstream updates do not guarantee that all security findings are fixed.
+This fork now carries approved [security backports](security-hardening.md), with
+legacy-file reading and authenticated new files. Preserve them during updates;
+the upstream version number alone does not attest equivalent behavior.
 Cryptgeon v2.9.3 retains the reviewed unbounded per-note lock map, CLI filename
 traversal and plaintext file metadata. Keep any local fixes until an upstream
 release is verified to replace them safely. The v3 prerelease changes the codec

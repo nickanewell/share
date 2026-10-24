@@ -3,6 +3,10 @@ This is the **Rival IT Share** branded fork of Cryptgeon. Use this checkout's
 [maintenance review](docs/maintenance-review.md) for validation and migration
 notes, and [upstream update guide](docs/upstream-maintenance.md) for the proposed
 opt-in update workflow. Publishing and deployment remain manual.
+The approved [security backports and file-reader migration](docs/security-hardening.md)
+are documented separately; review client compatibility before any rollout.
+The [proposed operations plan](docs/operations-plan.md) describes staged Ubuntu,
+Docker and app maintenance; it is not activated by this branch.
 
 <p align="center">
   <img src="./design/Github.png" alt="logo">

@@ -68,9 +68,11 @@
 					}
 					break
 				case 'file':
+					const decrypted = await Adapters.Files.decryptWithInfo(data.contents, key)
 					note = {
 						meta: { type: 'file' },
-						contents: await Adapters.Files.decrypt(data.contents, key),
+						contents: decrypted.files,
+						fileMetadataAuthenticated: decrypted.metadataAuthenticated,
 					}
 					break
 				default:

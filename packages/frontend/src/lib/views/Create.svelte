@@ -116,6 +116,7 @@
 	}
 
 	class EmptyContentError extends Error {}
+	class UnsupportedFileReaderError extends Error {}
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault()
@@ -132,6 +133,9 @@
 			if (derived) data.meta.derivation = derived[1]
 			if (isFile) {
 				if (files.length === 0) throw new EmptyContentError()
+				if ($status?.file_format_version !== 2) {
+					throw new UnsupportedFileReaderError()
+				}
 				data.contents = await Adapters.Files.encrypt(files, key)
 			} else {
 				if (note.contents === '') throw new EmptyContentError()
@@ -152,6 +156,8 @@
 				notify.error($t('home.errors.note_too_big'))
 			} else if (e instanceof EmptyContentError) {
 				notify.error($t('home.errors.empty_content'))
+			} else if (e instanceof UnsupportedFileReaderError) {
+				notify.error($t('home.errors.file_reader_outdated'))
 			} else {
 				console.error(e)
 				notify.error($t('home.errors.note_error'))
@@ -179,6 +185,7 @@
 				{/if}
 				{#if isFile}
 					<FileUpload data-testid="file-upload" label={$t('common.file')} bind:files />
+					<small>{$t('home.file_reader_notice')}</small>
 				{:else}
 					<TextArea
 						data-testid="text-field"

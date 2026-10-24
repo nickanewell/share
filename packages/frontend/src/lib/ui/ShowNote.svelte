@@ -1,5 +1,8 @@
 <script lang="ts" module>
-	export type DecryptedNote = Omit<NotePublic, 'contents'> & { contents: any }
+	export type DecryptedNote = Omit<NotePublic, 'contents'> & {
+		contents: any
+		fileMetadataAuthenticated?: boolean
+	}
 
 	function saveAs(file: File) {
 		const url = window.URL.createObjectURL(file)
@@ -52,6 +55,9 @@
 </script>
 
 <p class="error-text">{@html $t('show.warning_will_not_see_again')}</p>
+{#if note.meta.type === 'file' && note.fileMetadataAuthenticated === false}
+	<p class="error-text" role="note" data-testid="legacy-file-warning">{$t('show.legacy_file_warning')}</p>
+{/if}
 <div data-testid="result">
 	{#if note.meta.type === 'text'}
 		<div class="note">

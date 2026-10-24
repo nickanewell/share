@@ -1,5 +1,3 @@
-use std::{collections::HashMap, sync::Arc};
-
 use axum::{
     Router, ServiceExt,
     extract::{DefaultBodyLimit, Request},
@@ -7,7 +5,6 @@ use axum::{
 };
 use dotenv::dotenv;
 use lock::SharedState;
-use tokio::sync::Mutex;
 use tower::Layer;
 use tower_http::{
     compression::CompressionLayer,
@@ -30,9 +27,7 @@ mod store;
 async fn main() {
     dotenv().ok();
 
-    let shared_state = SharedState {
-        locks: Arc::new(Mutex::new(HashMap::new())),
-    };
+    let shared_state = SharedState::default();
 
     if !store::can_reach_redis() {
         println!("cannot reach redis");

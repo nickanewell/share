@@ -1,12 +1,12 @@
 import inquirer from 'inquirer'
-import { access, constants, writeFile } from 'node:fs/promises'
-import { basename, resolve } from 'node:path'
 import { AES, Hex } from 'occulto'
 import pretty from 'pretty-bytes'
 import { Adapters } from '../shared/adapters.js'
 import { API } from '../shared/api.js'
+import { captureDownloadDirectory, saveDownloadFiles, validateDownloadFilename } from '../utils/download-files.js'
 
 export async function download(url: URL, all: boolean, suggestedPassword?: string) {
+  const downloadDirectory = captureDownloadDirectory()
   API.setOptions({ server: url.origin })
   const id = url.pathname.split('/')[2]
   const preview = await API.info(id).catch(() => {
@@ -39,45 +39,41 @@ export async function download(url: URL, all: boolean, suggestedPassword?: strin
   const couldNotDecrypt = new Error('Could not decrypt note. Probably an invalid password')
   switch (note.meta.type) {
     case 'file':
-      const files = await Adapters.Files.decrypt(note.contents, key).catch(() => {
+      const decrypted = await Adapters.Files.decryptWithInfo(note.contents, key).catch(() => {
         throw couldNotDecrypt
       })
+      const files = decrypted.files
       if (!files) {
         throw new Error('No files found in note')
       }
+      if (decrypted.metadataAuthenticated === false) {
+        console.warn('Warning: this older share does not authenticate file names or types. Verify them before opening.')
+      }
+      for (const file of files) validateDownloadFilename(file.name)
 
       let selected: typeof files
       if (all) {
         selected = files
       } else {
-        const { names } = await inquirer.prompt([
+        const { indices } = await inquirer.prompt([
           {
             type: 'checkbox',
             message: 'What files should be saved?',
-            name: 'names',
-            choices: files.map((file) => ({
-              value: file.name,
+            name: 'indices',
+            choices: files.map((file, index) => ({
+              value: index,
               name: `${file.name} - ${file.type} - ${pretty(file.size, { binary: true })}`,
               checked: true,
             })),
           },
         ])
-        selected = files.filter((file) => names.includes(file.name))
+        selected = files.filter((file, index) => indices.includes(index))
       }
 
       if (!selected.length) throw new Error('No files selected')
-      await Promise.all(
-        selected.map(async (file) => {
-          let filename = resolve(file.name)
-          try {
-            // If exists -> prepend timestamp to not overwrite the current file
-            await access(filename, constants.R_OK)
-            filename = resolve(`${Date.now()}-${file.name}`)
-          } catch {}
-          await writeFile(filename, file.contents)
-          console.log(`Saved: ${basename(filename)}`)
-        })
-      )
+      for (const filename of saveDownloadFiles(selected, downloadDirectory)) {
+        console.log(`Saved: ${filename}`)
+      }
 
       break
     case 'text':

@@ -23,8 +23,10 @@
 		"intro": "Easily send <i>fully encrypted</i>, secure notes or files with one click. Just create a note and share the link.",
 		"explanation": "the note will expire and be destroyed after {type}.",
 		"new_note": "new note",
+		"file_reader_notice": "New file links need the updated Rival IT Share app or CLI.",
 		"new_note_notice": "<b>availability:</b><br />the note is not guaranteed to be stored as everything is kept in ram, if it fills up the oldest notes will be removed.<br />(you probably will be fine, just be warned.)",
 		"errors": {
+			"file_reader_outdated": "This server needs an update before it can share files securely.",
 			"note_too_big": "could not create note. note is too big",
 			"note_error": "could not create note. please try again.",
 			"max": "max: {n}",
@@ -42,6 +44,7 @@
 		"remove": "Remove"
 	},
 	"show": {
+		"legacy_file_warning": "This older share does not verify file names or types. Check them before opening.",
 		"errors": {
 			"not_found": "note was not found or was already deleted.",
 			"decryption_failed": "wrong password. could not decipher. probably a broken link. note was destroyed.",

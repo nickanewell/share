@@ -48,6 +48,7 @@ jobs:
       - name: Install dependencies and validate the frontend
         run: |
           pnpm install --frozen-lockfile
+          pnpm run test:security
           pnpm --filter @cryptgeon/web exec svelte-kit sync
           pnpm --filter @cryptgeon/web check
           pnpm run build

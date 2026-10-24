@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:security": "node --test --test-timeout=30000 test/security/*.test.mjs",
     "dev:docker": "docker compose -f docker-compose.dev.yaml up redis",
     "dev:packages": "pnpm --parallel run dev",
     "dev": "run-p dev:*",

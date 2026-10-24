@@ -6,6 +6,7 @@ use serde::Serialize;
 pub struct Status {
     // General
     pub version: String,
+    pub file_format_version: u8,
     // Config
     pub max_size: u32,
     pub max_views: u32,
@@ -26,6 +27,7 @@ pub struct Status {
 pub async fn get_status() -> (StatusCode, Json<Status>) {
     let status = Status {
         version: config::VERSION.to_string(),
+        file_format_version: 2,
         max_size: *config::LIMIT as u32,
         max_views: *config::MAX_VIEWS,
         max_expiration: *config::MAX_EXPIRATION,

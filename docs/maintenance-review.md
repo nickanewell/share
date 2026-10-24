@@ -4,6 +4,11 @@ This local branch integrates stable Cryptgeon **v2.9.3** into the branded fork,
 refreshes compatible dependencies, and prepares review-based upstream updates.
 Nothing was pushed, enabled on GitHub, published, or deployed.
 
+This describes the first maintenance stage. The subsequently approved
+[security backports](security-hardening.md) fix the three source issues below and
+add protocol/rollout tests. Its server observations also supersede the initial
+production-version unknowns; deployment itself remains unchanged.
+
 ## Live deployment observations
 
 The bounded passive check used ordinary HTTPS GETs and the available **Google
