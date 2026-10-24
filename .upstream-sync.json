@@ -1,0 +1,17 @@
+{
+  "repository": "cupcakearmy/cryptgeon",
+  "current_tag": "v2.9.3",
+  "current_commit": "40f35595337a6008afd41cd834b8eb4e8644f956",
+  "major": 2,
+  "protected_paths": [
+    "packages/frontend/src/app.html",
+    "packages/frontend/src/lib/stores/theme.ts",
+    "packages/frontend/src/lib/views/Header.svelte",
+    "packages/frontend/src/routes/+layout.svelte",
+    "packages/frontend/src/routes/about/+page.svelte",
+    "packages/frontend/static/favicon.png",
+    "packages/frontend/static/logo-dark.svg",
+    "packages/frontend/static/logo-light.svg",
+    "packages/frontend/static/branding"
+  ]
+}

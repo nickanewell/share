@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { t } from 'svelte-intl-precompile'
 	import Button from '$lib/ui/Button.svelte'
+	import { toArrayBuffer } from '$lib/utils'
 	import type { FileDTO } from 'cryptgeon/shared'
 
 	interface Props {
@@ -12,7 +13,7 @@
 	let previewUrls: string[] = $state([])
 
 	$effect(() => {
-		const urls = files.map((f) => URL.createObjectURL(new Blob([f.contents], { type: f.type })))
+		const urls = files.map((f) => URL.createObjectURL(new Blob([toArrayBuffer(f.contents)], { type: f.type })))
 		previewUrls = urls
 		return () => {
 			for (const url of urls) URL.revokeObjectURL(url)

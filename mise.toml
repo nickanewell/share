@@ -1,6 +1,6 @@
 [tools]
 pnpm = "11.5.0"
-rust = "1.95"
+rust = "1.99.1"
 watchexec = "latest"
 # Node loaded below from .nvmrc
 

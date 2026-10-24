@@ -8,7 +8,7 @@
 
 <header>
 	<a onclick={reset} href="/">
-		<img alt="logo" src={$themeLogo} />
+		<img alt="Rival IT" src={$themeLogo} />
 	</a>
 </header>
 
@@ -41,6 +41,5 @@
 	header img {
 		width: 100%;
 		max-height: 8rem;
-		transform: translateX(-1rem);
 	}
 </style>

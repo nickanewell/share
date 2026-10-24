@@ -11,7 +11,11 @@ services:
       - /data
 
   app:
-    image: cupcakearmy/cryptgeon:latest
+    # Build this branded checkout locally; no upstream image is substituted.
+    # This file is a deployment template, not an automatic rollout.
+    build: .
+    image: rival-it-share:local
+    pull_policy: build
     depends_on:
       - redis
     environment:

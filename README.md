@@ -1,3 +1,9 @@
+This is the **Rival IT Share** branded fork of Cryptgeon. Use this checkout's
+`docker-compose.yaml` to build the branded app. See the
+[maintenance review](docs/maintenance-review.md) for validation and migration
+notes, and [upstream update guide](docs/upstream-maintenance.md) for the proposed
+opt-in update workflow. Publishing and deployment remain manual.
+
 <p align="center">
   <img src="./design/Github.png" alt="logo">
 </p>
@@ -106,9 +112,9 @@ version: '3.8'
 
 services:
   redis:
-    image: redis:7-alpine
+    image: valkey/valkey:7-alpine
     # This is required to stay in RAM only.
-    command: redis-server --save "" --appendonly no
+    command: valkey-server --save "" --appendonly no
     # Set a size limit. See link below on how to customise.
     # https://redis.io/docs/latest/operate/rs/databases/memory-performance/eviction-policy/
     # --maxmemory 1gb --maxmemory-policy allkeys-lrulpine
@@ -117,7 +123,9 @@ services:
       - /data
 
   app:
-    image: cupcakearmy/cryptgeon:latest
+    build: .
+    image: rival-it-share:local
+    pull_policy: build
     depends_on:
       - redis
     environment:

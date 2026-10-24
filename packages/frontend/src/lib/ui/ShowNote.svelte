@@ -19,7 +19,7 @@
 	import { t } from 'svelte-intl-precompile'
 
 	import Button from '$lib/ui/Button.svelte'
-	import { copy } from '$lib/utils'
+	import { copy, toArrayBuffer } from '$lib/utils'
 	import type { FileDTO, NotePublic } from 'cryptgeon/shared'
 
 	interface Props {
@@ -32,8 +32,7 @@
 	let files: FileDTO[] = $state([])
 
 	async function downloadFile(file: FileDTO) {
-		// @ts-ignore
-		const f = new File([file.contents], file.name, {
+		const f = new File([toArrayBuffer(file.contents)], file.name, {
 			type: file.type,
 		})
 		saveAs(f)
@@ -83,7 +82,7 @@
 			{#if file.type.startsWith('image/')}
 				{#key file.name}
 					<img
-						src={URL.createObjectURL(new File([file.contents], file.name, { type: file.type }))}
+							src={URL.createObjectURL(new File([toArrayBuffer(file.contents)], file.name, { type: file.type }))}
 						alt={file.name}
 						class="preview"
 					/>
