@@ -1,0 +1,39 @@
+# Isolated Linux release gate, never a production override.
+# Always use the explicit file and unique project name documented below.
+services:
+  redis:
+    image: redis:7.4.11-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
+    platform: linux/amd64
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    restart: "no"
+
+  app:
+    image: rival-it-share:staging-${SOURCE_REVISION:?Set SOURCE_REVISION to the clean source commit}
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        SOURCE_REVISION: ${SOURCE_REVISION:?Set SOURCE_REVISION to the clean source commit}
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS: redis://redis/
+      SIZE_LIMIT: 10MiB
+    ports:
+      - "127.0.0.1:13000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/api/live/"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 5s
+    restart: "no"

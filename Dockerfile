@@ -20,6 +20,9 @@ RUN RUSTFLAGS="-Ctarget-feature=-crt-static" cargo build --release --locked
 
 # RUNNER
 FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+ARG SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/nickanewell/share" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
 WORKDIR /app
 RUN apk add --no-cache curl libgcc
 COPY --from=backend /tmp/target/release/cryptgeon .
