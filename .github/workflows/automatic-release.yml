@@ -1,0 +1,249 @@
+name: Build verified automatic app release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/automatic-release.yml'
+      - 'deploy/automatic/**'
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a tested release (also requires ENABLE_AUTOMATIC_RELEASES=true)'
+        type: boolean
+        required: true
+        default: false
+      validate_current:
+        description: 'Validate the current reviewed build on Linux; never publish'
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+concurrency:
+  group: rival-share-automatic-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'nickanewell/share' && github.ref == 'refs/heads/main' &&
+      !inputs.validate_current &&
+      (vars.ENABLE_AUTOMATIC_RELEASES == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      available: ${{ steps.release.outputs.available }}
+      source_commit: ${{ steps.source.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - name: Verify trusted controller tests
+        working-directory: control
+        run: python3 -m unittest discover -s deploy/automatic -p 'test_*.py'
+      - name: Discover and pin a compatible stable release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 control/deploy/automatic/discover_release.py
+          --control "$GITHUB_WORKSPACE/control" --github-output "$GITHUB_OUTPUT"
+      - name: Prepare source without running upstream scripts
+        if: steps.release.outputs.available == 'true'
+        id: source
+        env:
+          UPSTREAM_TAG: ${{ steps.release.outputs.tag }}
+          UPSTREAM_COMMIT: ${{ steps.release.outputs.upstream_commit }}
+          RELEASE_PARENT: ${{ steps.release.outputs.release_parent }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/prepare"
+          args=(--control "$GITHUB_WORKSPACE/control" --candidate "$RUNNER_TEMP/prepare/candidate"
+                --tag "$UPSTREAM_TAG" --expected-upstream-commit "$UPSTREAM_COMMIT")
+          if [ -n "$RELEASE_PARENT" ]; then args+=(--release-parent "$RELEASE_PARENT"); fi
+          python3 control/deploy/automatic/prepare_release.py "${args[@]}"
+          python3 - "$RUNNER_TEMP/prepare/release-input.json" "$GITHUB_OUTPUT" <<'PY'
+          import json,re,sys
+          source=json.load(open(sys.argv[1]))['source_commit']
+          assert re.fullmatch('[0-9a-f]{40}',source)
+          with open(sys.argv[2],'a') as out: out.write('source_commit='+source+'\n')
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: steps.release.outputs.available == 'true'
+        with:
+          name: automatic-source
+          path: |
+            ${{ runner.temp }}/prepare/source.bundle
+            ${{ runner.temp }}/prepare/release-input.json
+          if-no-files-found: error
+          retention-days: 7
+
+  gate:
+    needs: prepare
+    if: needs.prepare.outputs.available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: automatic-source
+          path: ${{ runner.temp }}/prepared
+      - name: Materialize candidate without credentials or hooks
+        env:
+          SOURCE_COMMIT: ${{ needs.prepare.outputs.source_commit }}
+          GIT_LFS_SKIP_SMUDGE: '1'
+          GIT_TERMINAL_PROMPT: '0'
+          GIT_CONFIG_NOSYSTEM: '1'
+        run: |
+          git -c core.hooksPath=/dev/null -c credential.helper= clone --no-checkout "$RUNNER_TEMP/prepared/source.bundle" "$RUNNER_TEMP/candidate"
+          git -c core.hooksPath=/dev/null -c credential.helper= -C "$RUNNER_TEMP/candidate" checkout --detach "$SOURCE_COMMIT"
+      - name: Run isolated build, security and compatibility gates
+        env:
+          SOURCE_COMMIT: ${{ needs.prepare.outputs.source_commit }}
+        run: >-
+          python3 control/deploy/automatic/gate.py
+          --control "$GITHUB_WORKSPACE/control" --candidate "$RUNNER_TEMP/candidate"
+          --image "rival-it-share:gate-$SOURCE_COMMIT" --output "$RUNNER_TEMP/gate"
+      - name: Export the exact tested image, without rebuilding
+        run: |
+          python3 - "$RUNNER_TEMP/gate/gates.json" "$RUNNER_TEMP/image.tar" <<'PY'
+          import json,re,subprocess,sys
+          gate=json.load(open(sys.argv[1])); image=gate['image_id']; tag=gate['image']
+          assert gate['passed'] is True and re.fullmatch('sha256:[0-9a-f]{64}',image)
+          assert tag=='rival-it-share:gate-'+gate['source_commit']
+          actual=subprocess.check_output(['docker','image','inspect',tag,'--format','{{.Id}}'],text=True).strip()
+          assert actual==image, 'The tested tag changed before export'
+          subprocess.run(['docker','save','-o',sys.argv[2],tag],check=True,timeout=180)
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: automatic-tested-image
+          path: |
+            ${{ runner.temp }}/image.tar
+            ${{ runner.temp }}/gate/gates.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain bounded gate diagnostics after a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: automatic-gate-diagnostics
+          # Host-created logs only; never upload a candidate-writable subtree.
+          path: ${{ runner.temp }}/gate/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish:
+    needs: [prepare, gate]
+    if: >-
+      github.repository == 'nickanewell/share' && github.ref == 'refs/heads/main' &&
+      needs.prepare.outputs.available == 'true' && needs.gate.result == 'success' &&
+      !inputs.validate_current &&
+      vars.ENABLE_AUTOMATIC_RELEASES == 'true' &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: automatic-source
+          path: ${{ runner.temp }}/artifacts
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: automatic-tested-image
+          path: ${{ runner.temp }}/artifacts
+      - name: Publish only the gated image and guarded source branch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RIVAL_ALLOW_PUBLISH: 'true'
+        run: >-
+          python3 control/deploy/automatic/publish_release.py prepare
+          --control "$GITHUB_WORKSPACE/control" --artifacts "$RUNNER_TEMP/artifacts"
+          --output "$RUNNER_TEMP/release" --publish
+      - name: Attest the manifest binding source, controls and image digest
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ runner.temp }}/release/release.json
+          create-storage-record: false
+      - name: Expose the signed release only after all assets are complete
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RIVAL_ALLOW_PUBLISH: 'true'
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: >-
+          python3 control/deploy/automatic/publish_release.py release
+          --control "$GITHUB_WORKSPACE/control" --artifacts "$RUNNER_TEMP/artifacts"
+          --output "$RUNNER_TEMP/release" --bundle "$BUNDLE_PATH" --publish
+
+  validate-current:
+    if: >-
+      github.repository == 'nickanewell/share' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == 'nickanewell/share') ||
+       (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.validate_current))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+      - name: Validate the maintained current source without publication
+        env:
+          GIT_LFS_SKIP_SMUDGE: '1'
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: '1'
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          python3 -m unittest discover -s control/deploy/automatic -p 'test_*.py'
+          git -c core.hooksPath=/dev/null -c credential.helper= clone --no-hardlinks --no-checkout "$GITHUB_WORKSPACE/control" "$RUNNER_TEMP/current-candidate"
+          git -c core.hooksPath=/dev/null -c credential.helper= -C "$RUNNER_TEMP/current-candidate" checkout --detach "$GITHUB_SHA"
+          python3 control/deploy/automatic/gate.py --control "$GITHUB_WORKSPACE/control" --candidate "$RUNNER_TEMP/current-candidate" --image "rival-it-share:gate-$GITHUB_SHA" --output "$RUNNER_TEMP/current-gate"
+          python3 - "$RUNNER_TEMP/current-gate/gates.json" "$RUNNER_TEMP/current-image.tar" <<'PY'
+          import json,subprocess,sys
+          sys.path.insert(0,'control/deploy/automatic')
+          import publish_release
+          gate=json.load(open(sys.argv[1])); tag=gate['image']
+          assert gate['passed'] is True
+          assert subprocess.check_output(['docker','image','inspect',tag,'--format','{{.Id}}'],text=True).strip()==gate['image_id']
+          subprocess.run(['docker','save','-o',sys.argv[2],tag],check=True,timeout=180)
+          publish_release.validate_image_archive(sys.argv[2],gate,{'source_commit':gate['source_commit']})
+          PY
+      - name: Retain bounded current-build diagnostics after a failure
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: current-gate-diagnostics
+          path: ${{ runner.temp }}/current-gate/*.log
+          if-no-files-found: ignore
+          retention-days: 7

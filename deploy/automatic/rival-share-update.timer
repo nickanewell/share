@@ -1,0 +1,16 @@
+[Unit]
+Description=Rival IT Share approved automatic app maintenance window
+
+[Timer]
+OnCalendar=Sat *-*-* 05:00:00 America/New_York
+RandomizedDelaySec=0
+AccuracySec=1min
+Persistent=false
+Unit=rival-share-update.service
+
+[Install]
+WantedBy=timers.target
+
+# Proposed only: Saturday 05:00 is distinct from guest OS Saturday 03:00 and
+# Windows host Sunday 03:00. A two-hour gap does not prove OS work is complete;
+# the controller defers if APT is active or a guest reboot is still required.

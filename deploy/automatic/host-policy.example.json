@@ -1,0 +1,25 @@
+{
+  "enabled": false,
+  "repository": "nickanewell/share",
+  "repository_id": "0",
+  "allowed_control_commit": "0000000000000000000000000000000000000000",
+  "signer_workflow": "nickanewell/share/.github/workflows/automatic-release.yml",
+  "branding_sha256": "55cc963bdeea12d0de225455dfbdde175b380886eb087a228df291eef34fb563",
+  "security_contract_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "allowed_major": 2,
+  "file_format_version": 2,
+  "compose_file": "/etc/rival-share/compose.json",
+  "app_service": "app",
+  "app_container": "share-app",
+  "redis_container": "share-redis",
+  "production_origin": "https://share.rivalit.ai",
+  "local_origin": "http://127.0.0.1:8000",
+  "state_dir": "/var/lib/rival-share-update",
+  "branding_assets": {
+    "packages/frontend/static/favicon.png": "bb8c283293506626731d20e919a312d659cfc81703c6f6de1f1025084d4f25ca",
+    "packages/frontend/static/logo-light.svg": "3bf482044417bdf5e5fcb399207b473ae62afd31429b92f35a435530544d5eba",
+    "packages/frontend/static/logo-dark.svg": "0f1dabede12f338be8208d2321b7fab95923e5247a7e89045508a385fe4fd88b",
+    "packages/frontend/static/branding/rival-it-master-lockup.png": "fbbc037e5f4350b16d2982dfeb7dd1ea0875f3d3f898a161cef6a3252a99ffd4",
+    "packages/frontend/static/branding/rival-it-master-mark.png": "bb8c283293506626731d20e919a312d659cfc81703c6f6de1f1025084d4f25ca"
+  }
+}
