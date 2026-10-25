@@ -153,12 +153,19 @@ passed again. Its private configuration contains only an empty `ghcr.io` auth
 entry to prevent automatic saved-helper discovery; foreign configuration stops
 execution before Docker and is never overwritten.
 
-This Mac has no Docker or `gh`. **Real Linux Docker execution, Docker-save archive
-format, GHCR publication/anonymous pulls, a genuine attestation bundle and the
-systemd sandbox have not been validated for this new updater.** They are mandatory
-gates before activation, not established by the prior app's successful Linux run.
-The publisher deliberately accepts one ordinary Docker-save image and rejects
-OCI-index/multi-image exports until an actual supported export is validated.
+The first non-publishing GitHub/Linux run passed **119 updater tests** and all six
+container gates, including **93 browser tests with 6 existing skips**. Its final
+archive check stopped on Docker's OCI export format. The importer now validates
+one platform-pinned OCI image as well as a classic Docker-save image, checking
+the manifest/config/layer identities without extracting paths onto the host.
+Multi-image indexes and attestation-only objects remain unsupported and fail closed.
+Require a successful current-commit Linux run, including its real archive check,
+before activation; consult the draft PR checks for the current result.
+
+This Mac has no Docker or `gh`. **GHCR publication/anonymous pulls, a genuine
+attestation bundle and the systemd sandbox still need controlled integration
+validation.** They are mandatory activation gates and are not established by
+the offline tests or container gate alone.
 GitHub must also permit the ephemeral token's guarded source-branch push; a denial
 stops rather than causing a fallback to a broader PAT.
 

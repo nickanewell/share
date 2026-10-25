@@ -127,9 +127,9 @@ jobs:
           gate=json.load(open(sys.argv[1])); image=gate['image_id']; tag=gate['image']
           assert gate['passed'] is True and re.fullmatch('sha256:[0-9a-f]{64}',image)
           assert tag=='rival-it-share:gate-'+gate['source_commit']
-          actual=subprocess.check_output(['docker','image','inspect',tag,'--format','{{.Id}}'],text=True).strip()
+          actual=subprocess.check_output(['docker','image','inspect','--platform=linux/amd64',tag,'--format','{{.Id}}'],text=True).strip()
           assert actual==image, 'The tested tag changed before export'
-          subprocess.run(['docker','save','-o',sys.argv[2],tag],check=True,timeout=180)
+          subprocess.run(['docker','save','--platform=linux/amd64','-o',sys.argv[2],tag],check=True,timeout=180)
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -235,8 +235,8 @@ jobs:
           import publish_release
           gate=json.load(open(sys.argv[1])); tag=gate['image']
           assert gate['passed'] is True
-          assert subprocess.check_output(['docker','image','inspect',tag,'--format','{{.Id}}'],text=True).strip()==gate['image_id']
-          subprocess.run(['docker','save','-o',sys.argv[2],tag],check=True,timeout=180)
+          assert subprocess.check_output(['docker','image','inspect','--platform=linux/amd64',tag,'--format','{{.Id}}'],text=True).strip()==gate['image_id']
+          subprocess.run(['docker','save','--platform=linux/amd64','-o',sys.argv[2],tag],check=True,timeout=180)
           publish_release.validate_image_archive(sys.argv[2],gate,{'source_commit':gate['source_commit']})
           PY
       - name: Retain bounded current-build diagnostics after a failure

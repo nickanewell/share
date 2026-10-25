@@ -358,7 +358,8 @@ def execute_gate(control, candidate, image, output, *, runner_factory=Runner, sl
                   env=['CRYPTGEON_TEST_SERVER=http://127.0.0.1:8000'], timeout=900)
         require_browser_report(results / 'report.json')
         checks.append('browser-chrome-firefox-webkit')
-        metadata = json.loads(run(['docker', 'image', 'inspect', image, '--format', '{{json .}}'], 'image-identity', 30))
+        metadata = json.loads(run(['docker', 'image', 'inspect', '--platform=linux/amd64', image,
+                                   '--format', '{{json .}}'], 'image-identity', 30))
         image_id = metadata.get('Id', '')
         labels = metadata.get('Config', {}).get('Labels', {})
         if not IMAGE_ID.fullmatch(image_id) or not isinstance(labels, dict) or labels.get('org.opencontainers.image.revision') != source:

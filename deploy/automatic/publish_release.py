@@ -10,6 +10,7 @@ retried, overwritten or rolled back by deleting remotely published material.
 
 import argparse
 import contextlib
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -222,12 +223,123 @@ def validate_bundle(control, bundle, source, trusted, work, env, runner):
     return bare
 
 
-def validate_image_archive(path, gates, source):
-    """Accept one Docker-save image, never extract archive paths to the host.
+def validate_oci_archive(archive, entries, docker_manifest, config, gates, source, read):
+    """Validate Docker/containerd's single-platform hybrid OCI/Docker export.
 
-    OCI-index archives are deliberately rejected until that export form is
-    separately validated; a later real Linux export must pass this preflight.
+    Docker save --platform=linux/amd64 selects one image manifest. Nested
+    indexes, attestations, external blobs, additional tags and unreferenced
+    content are deliberately unsupported. No archive path is extracted.
     """
+    index_type = "application/vnd.oci.image.index.v1+json"
+    manifest_types = {"application/vnd.oci.image.manifest.v1+json",
+                      "application/vnd.docker.distribution.manifest.v2+json"}
+    config_types = {"application/vnd.oci.image.config.v1+json",
+                    "application/vnd.docker.container.image.v1+json"}
+    layer_types = {"application/vnd.oci.image.layer.v1.tar",
+                   "application/vnd.oci.image.layer.v1.tar+gzip",
+                   "application/vnd.docker.image.rootfs.diff.tar",
+                   "application/vnd.docker.image.rootfs.diff.tar.gzip"}
+    used = {"manifest.json", "index.json", "oci-layout"}
+    name_keys = {"io.containerd.image.name", "org.opencontainers.image.ref.name"}
+
+    def annotations(value):
+        if not isinstance(value, dict) or any(not isinstance(k, str) or not isinstance(v, str)
+                                              for k, v in value.items()):
+            raise PublishError("Malformed OCI annotations")
+        return value
+
+    def document(value, required, optional):
+        if (not isinstance(value, dict) or not required <= set(value)
+                or set(value) - required - optional or type(value.get("schemaVersion")) is not int
+                or value["schemaVersion"] != 2):
+            raise PublishError("Unsupported OCI index/manifest schema")
+        if "annotations" in value and name_keys & set(annotations(value["annotations"])):
+            raise PublishError("Unexpected OCI image naming annotation")
+
+    def descriptor(value, allowed_types, maximum, *, named=False):
+        if (not isinstance(value, dict) or not {"mediaType", "digest", "size"} <= set(value)
+                or set(value) - {"mediaType", "digest", "size", "annotations", "platform"}
+                or not isinstance(value["mediaType"], str) or value["mediaType"] not in allowed_types
+                or not isinstance(value["digest"], str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", value["digest"])
+                or type(value["size"]) is not int or not 0 < value["size"] <= maximum):
+            raise PublishError("Unsupported OCI descriptor")
+        if "platform" in value and value["platform"] != {"os": "linux", "architecture": "amd64"}:
+            raise PublishError("Only the tested linux/amd64 OCI platform is accepted")
+        names = annotations(value.get("annotations", {}))
+        if named:
+            if (names.get("io.containerd.image.name") not in
+                    {gates["image"], "docker.io/library/" + gates["image"]}
+                    or names.get("org.opencontainers.image.ref.name") != "gate-" + source["source_commit"]):
+                raise PublishError("OCI archive must name only the gated local image tag")
+        elif name_keys & set(names):
+            raise PublishError("Unexpected OCI image naming annotation")
+        name = "blobs/sha256/" + value["digest"][7:]
+        item = entries.get(name)
+        if item is None or not item.isfile() or item.size != value["size"]:
+            raise PublishError("OCI blob is missing or its declared size changed")
+        digest = hashlib.sha256()
+        with archive.extractfile(item) as stream:
+            while chunk := stream.read(65536):
+                digest.update(chunk)
+        if "sha256:" + digest.hexdigest() != value["digest"]:
+            raise PublishError("OCI blob digest mismatch")
+        used.add(name)
+        return name
+
+    if strict_json(read("oci-layout", 1024)) != {"imageLayoutVersion": "1.0.0"}:
+        raise PublishError("Unsupported OCI image layout")
+    index = strict_json(read("index.json", 1024 * 1024))
+    document(index, {"schemaVersion", "manifests"}, {"mediaType", "annotations"})
+    if index.get("mediaType", index_type) != index_type or not isinstance(index["manifests"], list) or len(index["manifests"]) != 1:
+        raise PublishError("Expected one image manifest in the OCI index")
+    manifest_name = descriptor(index["manifests"][0], manifest_types, 1024 * 1024, named=True)
+    # With the containerd image store, Docker's platform-specific inspect ID is
+    # this leaf manifest digest (not its config digest). It binds every layer.
+    if index["manifests"][0]["digest"] != gates["image_id"]:
+        raise PublishError("OCI manifest identity does not match the tested image ID")
+    manifest = strict_json(read(manifest_name, 1024 * 1024))
+    document(manifest, {"schemaVersion", "config", "layers"}, {"mediaType", "annotations"})
+    if manifest.get("mediaType", index["manifests"][0]["mediaType"]) != index["manifests"][0]["mediaType"]:
+        raise PublishError("OCI manifest media type disagrees with its descriptor")
+    config_name = descriptor(manifest["config"], config_types, 8 * 1024 * 1024)
+    if config_name != docker_manifest["Config"]:
+        raise PublishError("OCI and Docker metadata disagree about the tested config")
+    layers = manifest["layers"]
+    rootfs = config.get("rootfs")
+    if (config.get("os") != "linux" or config.get("architecture") != "amd64"
+            or not isinstance(layers, list) or not 0 < len(layers) <= 128
+            or not isinstance(rootfs, dict) or rootfs.get("type") != "layers"
+            or not isinstance(rootfs.get("diff_ids"), list) or len(rootfs["diff_ids"]) != len(layers)
+            or any(not isinstance(d, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", d) for d in rootfs["diff_ids"])):
+        raise PublishError("OCI image config must bind the tested platform and layer identities")
+    paths, uncompressed = [], 0
+    for layer, expected_diff_id in zip(layers, rootfs["diff_ids"]):
+        name = descriptor(layer, layer_types, LIMITS["image.tar"])
+        paths.append(name)
+        digest = hashlib.sha256()
+        try:
+            with archive.extractfile(entries[name]) as raw:
+                stream = gzip.GzipFile(fileobj=raw) if layer["mediaType"].endswith(("+gzip", ".gzip")) else raw
+                with stream:
+                    while chunk := stream.read(65536):
+                        uncompressed += len(chunk)
+                        if uncompressed > LIMITS["image.tar"]:
+                            raise PublishError("OCI layers exceed their uncompressed size limit")
+                        digest.update(chunk)
+        except (OSError, EOFError) as error:
+            raise PublishError("Malformed compressed OCI layer") from error
+        if "sha256:" + digest.hexdigest() != expected_diff_id:
+            raise PublishError("OCI layer does not match the tested config diff ID")
+    if paths != docker_manifest["Layers"]:
+        raise PublishError("OCI and Docker metadata disagree about image layers")
+    if ({name for name, item in entries.items() if item.isfile()} != used
+            or any(item.isdir() and name not in {"blobs", "blobs/sha256"} for name, item in entries.items())):
+        raise PublishError("OCI archive contains unexpected or unreferenced content")
+
+
+def validate_image_archive(path, gates, source):
+    """Accept one checked Docker-save image; never extract paths to the host."""
     with tarfile.open(path, "r:") as archive:
         entries = {}
         total = 0
@@ -235,14 +347,12 @@ def validate_image_archive(path, gates, source):
             name = member.name
             if len(entries) >= 20000 or name in entries or not name or str(PurePosixPath(name)) != name or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts:
                 raise PublishError("Ambiguous or unsafe image archive path")
-            if not (member.isfile() or member.isdir()) or member.size > LIMITS["image.tar"]:
+            if not (member.isfile() or member.isdir()) or not 0 <= member.size <= LIMITS["image.tar"]:
                 raise PublishError("Image archive contains an unsupported entry")
             total += member.size
             if total > LIMITS["image.tar"]:
                 raise PublishError("Image archive exceeds its uncompressed size limit")
             entries[name] = member
-        if "index.json" in entries or "oci-layout" in entries:
-            raise PublishError("OCI-index image exports require separate validation; no image was loaded")
         def read(name, maximum):
             item = entries.get(name)
             if item is None or not item.isfile() or item.size > maximum:
@@ -264,7 +374,8 @@ def validate_image_archive(path, gates, source):
                     or not SHA256.fullmatch(repositories["rival-it-share"][wanted_tag])):
                 raise PublishError("Legacy archive repository metadata contains an unexpected tag")
         config_data = read(entry["Config"], 8 * 1024 * 1024)
-        if "sha256:" + hashlib.sha256(config_data).hexdigest() != gates["image_id"]:
+        is_oci = "index.json" in entries or "oci-layout" in entries
+        if not is_oci and "sha256:" + hashlib.sha256(config_data).hexdigest() != gates["image_id"]:
             raise PublishError("Image archive config does not match the tested image ID")
         config = strict_json(config_data)
         if not isinstance(config, dict) or not isinstance(config.get("config"), dict):
@@ -277,6 +388,8 @@ def validate_image_archive(path, gates, source):
         layers = entry.get("Layers")
         if not isinstance(layers, list) or not 0 < len(layers) <= 128 or any(not isinstance(name, str) or name not in entries or not entries[name].isfile() for name in layers):
             raise PublishError("Image archive layers are missing or malformed")
+        if is_oci:
+            validate_oci_archive(archive, entries, entry, config, gates, source, read)
 
 
 @contextlib.contextmanager
@@ -399,7 +512,7 @@ def prepare(control, artifacts, output, *, publish=False, environ=None, runner=s
         write_json(docker_config / "config.json", {"auths": {"ghcr.io": {}}, "credsStore": "", "credHelpers": {}})
         docker_env = dict(env, DOCKER_CONFIG=str(docker_config))
         command(["docker", "load", "--input", str(work / "image.tar")], env=docker_env, runner=runner, timeout=180)
-        image = strict_json(command(["docker", "image", "inspect", gates["image"], "--format", "{{json .}}"], env=docker_env, runner=runner)[0])
+        image = strict_json(command(["docker", "image", "inspect", "--platform=linux/amd64", gates["image"], "--format", "{{json .}}"], env=docker_env, runner=runner)[0])
         if image.get("Id") != gates["image_id"] or image.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != source["source_commit"]:
             raise PublishError("Loaded image identity does not match the tested candidate; nothing pushed")
         remote_image = IMAGE + ":candidate-" + source["source_commit"]

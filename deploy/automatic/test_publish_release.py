@@ -1,6 +1,7 @@
 """Local Git/archive fixtures and mocked external publication; no network."""
 
 import copy
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -11,6 +12,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
@@ -332,6 +334,182 @@ class PublicationTests(unittest.TestCase):
         for path in ("/repos/attacker/share/releases", "/repos/nickanewell/share/../../other", "/repos/nickanewell/share/releases/1/assets?name=../secret"):
             with self.assertRaisesRegex(publisher.PublishError, "destination"):
                 api.request("POST", path, b"", upload=True)
+
+
+class OCIArchiveTests(unittest.TestCase):
+    """Docker/containerd hybrid exports are checked without Docker or Git."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="rival-oci-test-")
+        self.path = Path(self.temp.name) / "image.tar"
+        self.source = {"source_commit": "a" * 40}
+        self.gates = {"image": "rival-it-share:gate-" + "a" * 40}
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    @staticmethod
+    def encoded(value):
+        return json.dumps(value, sort_keys=True).encode()
+
+    def fixture(self, *, compressed=False, docker_media=False, layer_data=b"synthetic layer bytes"):
+        self.files = {}
+        def blob(data, media):
+            digest = hashlib.sha256(data).hexdigest()
+            self.files["blobs/sha256/" + digest] = data
+            return {"mediaType": media, "digest": "sha256:" + digest, "size": len(data)}
+        config_type = "application/vnd.docker.container.image.v1+json" if docker_media else "application/vnd.oci.image.config.v1+json"
+        manifest_type = "application/vnd.docker.distribution.manifest.v2+json" if docker_media else "application/vnd.oci.image.manifest.v1+json"
+        layer_type = ("application/vnd.docker.image.rootfs.diff.tar" if docker_media else "application/vnd.oci.image.layer.v1.tar")
+        if compressed:
+            layer_type += ".gzip" if docker_media else "+gzip"
+        self.config = {"os": "linux", "architecture": "amd64",
+                       "rootfs": {"type": "layers", "diff_ids": ["sha256:" + hashlib.sha256(layer_data).hexdigest()]},
+                       "config": {"Labels": {"org.opencontainers.image.revision": self.source["source_commit"],
+                                             "org.opencontainers.image.source": "https://github.com/nickanewell/share"}}}
+        config = blob(self.encoded(self.config), config_type)
+        layer = blob(gzip.compress(layer_data, mtime=0) if compressed else layer_data, layer_type)
+        self.gates["image_id"] = config["digest"]
+        self.manifest = {"schemaVersion": 2, "mediaType": manifest_type, "config": config, "layers": [layer]}
+        descriptor = blob(self.encoded(self.manifest), manifest_type)
+        self.gates["image_id"] = descriptor["digest"]
+        descriptor["annotations"] = {"io.containerd.image.name": "docker.io/library/" + self.gates["image"],
+                                     "org.opencontainers.image.ref.name": "gate-" + self.source["source_commit"]}
+        descriptor["platform"] = {"os": "linux", "architecture": "amd64"}
+        self.index = {"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json", "manifests": [descriptor]}
+        self.docker = [{"Config": "blobs/sha256/" + config["digest"][7:], "RepoTags": [self.gates["image"]],
+                        "Layers": ["blobs/sha256/" + layer["digest"][7:]]}]
+        self.files["oci-layout"] = b'{"imageLayoutVersion":"1.0.0"}'
+        self.refresh_metadata()
+
+    def refresh_metadata(self):
+        self.files["index.json"] = self.encoded(self.index)
+        self.files["manifest.json"] = self.encoded(self.docker)
+
+    def replace_manifest(self):
+        descriptor = self.index["manifests"][0]
+        del self.files["blobs/sha256/" + descriptor["digest"][7:]]
+        data = self.encoded(self.manifest)
+        digest = hashlib.sha256(data).hexdigest()
+        descriptor.update(digest="sha256:" + digest, size=len(data))
+        self.gates["image_id"] = descriptor["digest"]
+        self.files["blobs/sha256/" + digest] = data
+        self.refresh_metadata()
+
+    def write_archive(self, *, duplicate=False, symlink=False):
+        with tarfile.open(self.path, "w") as archive:
+            for directory in ("blobs/", "blobs/sha256/"):
+                item = tarfile.TarInfo(directory); item.type = tarfile.DIRTYPE
+                archive.addfile(item)
+            for name, data in self.files.items():
+                item = tarfile.TarInfo(name); item.size = len(data)
+                archive.addfile(item, io.BytesIO(data))
+            if duplicate:
+                item = tarfile.TarInfo("index.json"); item.size = len(self.files["index.json"])
+                archive.addfile(item, io.BytesIO(self.files["index.json"]))
+            if symlink:
+                item = tarfile.TarInfo("link"); item.type = tarfile.SYMTYPE; item.linkname = "/etc/passwd"
+                archive.addfile(item)
+
+    def validate(self):
+        publisher.validate_image_archive(self.path, self.gates, self.source)
+
+    def test_single_platform_oci_and_docker_media_exports_validate_including_gzip(self):
+        for compressed, docker_media in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(compressed=compressed, docker_media=docker_media):
+                self.fixture(compressed=compressed, docker_media=docker_media)
+                self.write_archive(); self.validate()
+
+    def test_multiple_manifests_nested_indexes_and_artifact_descriptors_stop(self):
+        for change in ("multiple", "nested", "artifact", "external", "embedded", "wrong-platform", "unknown-type"):
+            with self.subTest(change=change):
+                self.fixture()
+                desc = self.index["manifests"][0]
+                if change == "multiple": self.index["manifests"].append(copy.deepcopy(desc))
+                elif change == "nested": desc["mediaType"] = "application/vnd.oci.image.index.v1+json"
+                elif change == "artifact": desc["artifactType"] = "application/vnd.in-toto+json"
+                elif change == "external": desc["urls"] = ["https://attacker.invalid/image"]
+                elif change == "embedded": desc["data"] = "e30="
+                elif change == "wrong-platform": desc["platform"]["architecture"] = "arm64"
+                else: desc["mediaType"] = "application/octet-stream"
+                self.refresh_metadata(); self.write_archive()
+                with self.assertRaises(publisher.PublishError): self.validate()
+
+    def test_oci_name_and_hybrid_config_or_layers_must_agree(self):
+        for change in ("tag", "name", "ref", "config", "layers"):
+            with self.subTest(change=change):
+                self.fixture()
+                if change == "tag": self.docker[0]["RepoTags"].append("another:tag")
+                elif change == "name": self.index["manifests"][0]["annotations"]["io.containerd.image.name"] = "other:tag"
+                elif change == "ref": self.index["manifests"][0]["annotations"]["org.opencontainers.image.ref.name"] = "other"
+                elif change == "config": self.docker[0]["Config"] = self.docker[0]["Layers"][0]
+                else: self.docker[0]["Layers"] = [self.docker[0]["Config"]]
+                self.refresh_metadata(); self.write_archive()
+                with self.assertRaises(publisher.PublishError): self.validate()
+
+    def test_oci_identity_requires_exact_tested_leaf_manifest_not_config_or_index(self):
+        for identity in ("config", "index", "other"):
+            with self.subTest(identity=identity):
+                self.fixture()
+                self.gates["image_id"] = (self.manifest["config"]["digest"] if identity == "config" else
+                    "sha256:" + hashlib.sha256(self.files["index.json"]).hexdigest() if identity == "index" else
+                    "sha256:" + "f" * 64)
+                self.write_archive()
+                with self.assertRaisesRegex(publisher.PublishError, "manifest identity"): self.validate()
+
+    def test_blob_size_digest_missing_or_unreferenced_content_is_rejected(self):
+        for change in ("size", "digest", "missing", "extra"):
+            with self.subTest(change=change):
+                self.fixture()
+                desc = self.index["manifests"][0]
+                name = "blobs/sha256/" + desc["digest"][7:]
+                if change == "size": desc["size"] += 1
+                elif change == "digest": self.files[name] = b"x" * len(self.files[name])
+                elif change == "missing": del self.files[name]
+                else: self.files["blobs/sha256/" + "f" * 64] = b"unexpected"
+                self.refresh_metadata(); self.write_archive()
+                with self.assertRaises(publisher.PublishError): self.validate()
+
+    def test_repointing_layer_and_descriptor_cannot_change_config_bound_diff_id(self):
+        self.fixture()
+        layer = self.manifest["layers"][0]
+        del self.files["blobs/sha256/" + layer["digest"][7:]]
+        data = b"different image filesystem bytes"
+        digest = hashlib.sha256(data).hexdigest()
+        layer.update(digest="sha256:" + digest, size=len(data))
+        name = "blobs/sha256/" + digest
+        self.files[name] = data; self.docker[0]["Layers"] = [name]
+        self.replace_manifest(); self.write_archive()
+        with self.assertRaisesRegex(publisher.PublishError, "diff ID"): self.validate()
+
+    def test_duplicate_json_duplicate_tar_names_symlinks_and_traversal_stop(self):
+        for change in ("json", "duplicate", "symlink", "traversal"):
+            with self.subTest(change=change):
+                self.fixture()
+                if change == "json": self.files["oci-layout"] = b'{"imageLayoutVersion":"1.0.0","imageLayoutVersion":"1.0.0"}'
+                if change == "traversal": self.files["../outside"] = b"bad"
+                self.write_archive(duplicate=change == "duplicate", symlink=change == "symlink")
+                with self.assertRaises(publisher.PublishError): self.validate()
+
+    def test_incomplete_layout_wrong_version_schema_and_unsupported_compression_stop(self):
+        for change in ("layout", "version", "schema", "bool-schema", "zstd"):
+            with self.subTest(change=change):
+                self.fixture()
+                if change == "layout": del self.files["oci-layout"]
+                elif change == "version": self.files["oci-layout"] = b'{"imageLayoutVersion":"2.0.0"}'
+                elif change == "schema": self.index["schemaVersion"] = 3
+                elif change == "bool-schema": self.index["schemaVersion"] = True
+                else:
+                    self.manifest["layers"][0]["mediaType"] = "application/vnd.oci.image.layer.v1.tar+zstd"
+                    self.replace_manifest()
+                self.refresh_metadata(); self.write_archive()
+                with self.assertRaises(publisher.PublishError): self.validate()
+
+    def test_gzip_expansion_is_bounded_before_loading(self):
+        self.fixture(compressed=True, layer_data=b"x" * 100000)
+        self.write_archive()
+        with patch.dict(publisher.LIMITS, {"image.tar": 32768}):
+            with self.assertRaisesRegex(publisher.PublishError, "uncompressed size limit"): self.validate()
 
 
 if __name__ == "__main__":

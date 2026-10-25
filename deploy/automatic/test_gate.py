@@ -125,6 +125,8 @@ class GateTests(unittest.TestCase):
         self.assertEqual(tuple(result['checks']), gate.CHECKS)
         self.assertEqual(result['source_commit'], self.source)
         self.assertEqual(result['image_id'], self.fake.image_id)
+        identity = next(args for args, _, log in self.fake.calls if log == 'image-identity')
+        self.assertIn('--platform=linux/amd64', identity)
         self.assertEqual(json.loads((self.output / 'gates.json').read_text()), result)
         self.assertFalse(self.fake.containers)
         self.assertFalse(self.fake.networks)
