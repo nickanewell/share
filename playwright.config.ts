@@ -9,6 +9,7 @@ const config: PlaywrightTestConfig = {
 
   outputDir: './test-results',
   testDir: './test',
+  testMatch: '**/*.spec.{js,ts}',
   timeout: 30_000,
   fullyParallel: true,
   retries: 2,

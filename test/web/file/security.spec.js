@@ -159,7 +159,8 @@ test('browser file upload refuses missing server capability before posting a not
   })
   await page.route(/\/api\/status\/?$/, async route => {
     localURL(route.request().url())
-    const response = await route.fetch()
+    // Keep JSON rewriting independent of the browser's advertised compression.
+    const response = await route.fetch({ headers: { ...route.request().headers(), 'accept-encoding': 'identity' } })
     const status = await response.json()
     delete status.file_format_version
     await route.fulfill({ json: status })
@@ -167,6 +168,7 @@ test('browser file upload refuses missing server capability before posting a not
   await page.goto('/')
   await page.getByTestId('switch-file').click()
   await page.getByTestId('file-upload').setInputFiles({ name: 'integration.pdf', mimeType: 'application/pdf', buffer: bytes })
+  await expect(page.locator('.pasted-files-preview .file-name')).toHaveText('integration.pdf')
   await page.locator('button:has-text("create")').click()
   await expect(page.locator('._toastContainer')).toContainText('needs an update before it can share files securely')
   await expect(page.getByTestId('share-link')).toHaveCount(0)
@@ -194,15 +196,41 @@ test('CLI file upload refuses missing server capability before posting a note', 
   } finally { globalThis.fetch = originalFetch }
 })
 
-test('oversized authenticated file receives the existing upload size error', async ({ page }) => {
+test('oversized authenticated file is rejected without creating a share', async ({ page, request }) => {
+  test.setTimeout(60_000)
   await page.goto('/')
   await page.getByTestId('switch-file').click()
   await page.getByTestId('file-upload').setInputFiles({ name: 'oversized-local-only.bin',
     mimeType: 'application/octet-stream', buffer: Buffer.alloc(9 * 1024 * 1024, 165) })
-  const response = page.waitForResponse(response => new URL(response.url()).origin === server
-    && new URL(response.url()).pathname.startsWith('/api/notes') && response.request().method() === 'POST')
+  await expect(page.locator('.pasted-files-preview .file-name')).toHaveText('oversized-local-only.bin')
+  await page.evaluate(() => {
+    const originalFetch = window.fetch
+    window.fetch = function (input, init) {
+      if (typeof input === 'string' && input.endsWith('/api/notes/')
+        && init?.method?.toUpperCase() === 'POST' && typeof init.body === 'string') {
+        window.__cryptgeonTestUploadBody = init.body
+      }
+      return originalFetch.call(this, input, init)
+    }
+  })
+  const posted = page.waitForRequest(upload => new URL(upload.url()).origin === server
+    && new URL(upload.url()).pathname.startsWith('/api/notes') && upload.method() === 'POST')
   await page.locator('button:has-text("create")').click()
-  expect((await response).status()).toBe(413)
-  await expect(page.locator('._toastContainer')).toContainText('could not create note. note is too big')
+  const upload = await posted
+  const endpoint = localURL(upload.url()).href
+  const body = await page.evaluate(() => window.__cryptgeonTestUploadBody)
+  expect(typeof body).toBe('string')
+  expect(body.length).toBeGreaterThan(0)
+  const observedBody = upload.postData()
+  if (observedBody !== null) expect(observedBody === body).toBe(true)
+  // WebKit can lose an early 413 to a broken-pipe upload error. Replay the exact
+  // browser ciphertext to verify the server limit independently of that transport.
+  const response = await request.post(endpoint, {
+    data: body,
+    headers: { 'Content-Type': upload.headers()['content-type'] ?? 'application/json' },
+    timeout: 20_000,
+  })
+  expect(response.status()).toBe(413)
+  await expect(page.locator('._toastContainer')).toContainText('could not create note')
   await expect(page.getByTestId('share-link')).toHaveCount(0)
 })
