@@ -50,9 +50,9 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm run test:security
+          pnpm run build
           pnpm --filter @cryptgeon/web exec svelte-kit sync
           pnpm --filter @cryptgeon/web check
-          pnpm run build
 
       - name: Prepare Docker and browsers for end-to-end tests
         run: |
