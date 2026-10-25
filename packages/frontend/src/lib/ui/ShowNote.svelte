@@ -1,5 +1,8 @@
 <script lang="ts" module>
-	export type DecryptedNote = Omit<NotePublic, 'contents'> & { contents: any }
+	export type DecryptedNote = Omit<NotePublic, 'contents'> & {
+		contents: any
+		fileMetadataAuthenticated?: boolean
+	}
 
 	function saveAs(file: File) {
 		const url = window.URL.createObjectURL(file)
@@ -19,7 +22,7 @@
 	import { t } from 'svelte-intl-precompile'
 
 	import Button from '$lib/ui/Button.svelte'
-	import { copy } from '$lib/utils'
+	import { copy, toArrayBuffer } from '$lib/utils'
 	import type { FileDTO, NotePublic } from 'cryptgeon/shared'
 
 	interface Props {
@@ -32,7 +35,7 @@
 	let files: FileDTO[] = $state([])
 
 	async function downloadFile(file: FileDTO) {
-		const f = new File([file.contents], file.name, {
+		const f = new File([toArrayBuffer(file.contents)], file.name, {
 			type: file.type,
 		})
 		saveAs(f)
@@ -52,6 +55,9 @@
 </script>
 
 <p class="error-text">{@html $t('show.warning_will_not_see_again')}</p>
+{#if note.meta.type === 'file' && note.fileMetadataAuthenticated === false}
+	<p class="error-text" role="note" data-testid="legacy-file-warning">{$t('show.legacy_file_warning')}</p>
+{/if}
 <div data-testid="result">
 	{#if note.meta.type === 'text'}
 		<div class="note">
@@ -79,6 +85,15 @@
 				</button>
 				<small> {file.type} － {prettyBytes(file.size)}</small>
 			</div>
+			{#if file.type.startsWith('image/')}
+				{#key file.name}
+					<img
+							src={URL.createObjectURL(new File([toArrayBuffer(file.contents)], file.name, { type: file.type }))}
+						alt={file.name}
+						class="preview"
+					/>
+				{/key}
+			{/if}
 		{/each}
 		<Button onclick={download}>{$t('show.download_all')}</Button>
 	{/if}
@@ -128,5 +143,14 @@
 	.links ul li {
 		margin-bottom: 0.5rem;
 		word-wrap: break-word;
+	}
+
+	.preview {
+		display: block;
+		max-width: 100%;
+		max-height: 60vh;
+		margin-bottom: 0.5rem;
+		border-radius: 0.25rem;
+		border: 2px solid var(--ui-bg-1);
 	}
 </style>

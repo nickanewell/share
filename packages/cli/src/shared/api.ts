@@ -31,6 +31,7 @@ type CallOptions = {
   url: string
   method: string
   body?: any
+  headers?: Record<string, string>
 }
 
 export class PayloadToLargeError extends Error {}
@@ -55,6 +56,7 @@ async function call(options: CallOptions) {
     mode: 'cors',
     headers: {
       'Content-Type': 'application/json',
+      ...options.headers,
     },
   })
 
@@ -83,6 +85,7 @@ async function get(id: string): Promise<NotePublic> {
   const data = await call({
     url: `notes/${id}`,
     method: 'delete',
+    headers: { 'X-Cryptgeon-File-Format': '2' },
   })
   const { contents, meta } = data
   const note = {
@@ -108,6 +111,8 @@ async function info(id: string): Promise<NoteInfo> {
 
 export type Status = {
   version: string
+  /** Absent on older servers whose bundled reader cannot open authenticated file envelopes. */
+  file_format_version?: number
   max_size: number
   max_views: number
   max_expiration: number
@@ -120,6 +125,7 @@ export type Status = {
   theme_favicon: string
   theme_page_title: string
   theme_new_note_notice: boolean
+  theme_home_link: boolean
 }
 
 async function status() {

@@ -1,0 +1,28 @@
+[Unit]
+Description=Verify, stage and promote a signed Rival IT Share app update
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+ConditionPathExists=/etc/rival-share/update-policy.json
+ConditionPathExists=/etc/rival-share/compose.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/lib/rival-share-update/controller.py --apply --policy /etc/rival-share/update-policy.json
+TimeoutStartSec=30min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/rival-share /var/lib/rival-share-update
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+# Deliberately not installed/enabled by repository checkout. This fixed root
+# service has root-equivalent Docker daemon authority; no socket is ever mounted
+# into candidate containers. Review/approve installation and root policy first.

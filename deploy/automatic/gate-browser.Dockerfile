@@ -1,0 +1,7 @@
+# Loaded from the reviewed control checkout, never from the upstream candidate.
+ARG CLIENT_IMAGE
+FROM ${CLIENT_IMAGE} AS compiled
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+WORKDIR /tmp
+COPY --from=compiled /tmp/ ./
+RUN mkdir -p /tmp/tmp

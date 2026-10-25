@@ -19,6 +19,10 @@ export async function upload(input: string | string[], options: UploadOptions): 
     contents = await Adapters.Text.encrypt(input, key)
     type = 'text'
   } else {
+    const status = await API.status()
+    if (status.file_format_version !== 2) {
+      throw new Error('Update this server to the authenticated file reader before sending files')
+    }
     const files: FileDTO[] = await Promise.all(
       input.map(async (path) => {
         const data = new Uint8Array(await readFile(path))

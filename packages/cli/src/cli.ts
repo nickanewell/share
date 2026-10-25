@@ -60,8 +60,8 @@ send
     try {
       const url = await upload(files, { views: options.views, expiration: options.minutes, password: options.password })
       console.log(`Note created:\n\n${url}`)
-    } catch {
-      exit('Could not create note')
+    } catch (error) {
+      exit(error instanceof Error ? error.message : 'Could not create note')
     }
   })
 send
